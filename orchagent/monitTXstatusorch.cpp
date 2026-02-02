@@ -50,14 +50,14 @@ void MonitTXStatusOrch::updateAvailablePorts()
         // Only monitor physical ports
         if (port.m_type == Port::PHY)
         {
-            addPort(port);
+            addPortToMonitoring(port);
         }
     }
 
     SWSS_LOG_NOTICE("MonitTXStatusOrch: Initialized monitoring for %zu ports", m_ports.size());
 }
 
-void MonitTXStatusOrch::addPort(const Port &port)
+void MonitTXStatusOrch::addPortToMonitoring(const Port &port)
 {
     SWSS_LOG_ENTER();
 

@@ -69,7 +69,7 @@ private:
     void resetTXErrorCounters();
     void loadConfig();
     void updateAvailablePorts();
-    void addPort(const Port &port);
+    void addPortToMonitoring(const Port &port);
 };
 
 #endif
