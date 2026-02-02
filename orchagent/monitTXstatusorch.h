@@ -26,6 +26,8 @@ extern PortsOrch *gPortsOrch;
 #define MONIT_TX_STATE_ERROR "NOT OK"
 #define MONIT_TX_STATE_OK "OK"
 #define MONIT_TX_STATE_RESET "RESET"
+#define NA_STATUS "N/A"
+#define NA_VALUE UINT64_MAX
 
 #define CFG_MONIT_TX_TIME_INTERVAL_KEY      "time_interval"
 #define CFG_MONIT_TX_ERROR_THRESHOLD_KEY    "error_threshold"
@@ -49,17 +51,12 @@ public:
     virtual void doTask(SelectableTimer &timer) override;
     virtual void doTask(Consumer &consumer) override;
 
-    void addPort(const Port &port);
-    void removePort(const Port &port);
-
 private:
     std::unordered_map<std::string, Port> m_ports;
     std::unordered_map<sai_object_id_t, uint64_t> m_portTxErrors;
     uint64_t m_TxErrorThreshold = DEFAULT_ERROR_THRESHOLD;
     
-    std::shared_ptr<swss::DBConnector> m_countersDb = nullptr;
     std::shared_ptr<swss::Table> m_countersTable = nullptr;
-    std::shared_ptr<swss::DBConnector> m_stateDb = nullptr;
     std::shared_ptr<swss::Table> m_stateTable = nullptr;
     std::unique_ptr<swss::Table> m_configTable = nullptr;
 
@@ -71,8 +68,8 @@ private:
     void updateStateDb(const Port &port, const std::string &status);
     void resetTXErrorCounters();
     void loadConfig();
-    void resetPortTxErrors(const Port &port);
     void updateAvailablePorts();
+    void addPort(const Port &port);
 };
 
 #endif

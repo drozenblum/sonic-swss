@@ -6,16 +6,15 @@ MonitTXStatusOrch::MonitTXStatusOrch(DBConnector *configDb)
     SWSS_LOG_ENTER();
     SWSS_LOG_NOTICE("MonitTXStatusOrch constructor started");
     
-    m_countersDb = std::make_shared<swss::DBConnector>("COUNTERS_DB", 0);
-    m_countersTable = std::make_shared<swss::Table>(m_countersDb.get(), COUNTERS_TABLE);
+    std::shared_ptr<swss::DBConnector> countersDb = std::make_shared<DBConnector>("COUNTERS_DB", 0);
+    m_countersTable = std::make_shared<swss::Table>(countersDb.get(), COUNTERS_TABLE);
     
-    m_stateDb = std::make_shared<swss::DBConnector>("STATE_DB", 0);
-    m_stateTable = std::make_shared<swss::Table>(m_stateDb.get(), STATE_MONIT_TX_STATUS_TABLE_NAME);
+    std::shared_ptr<swss::DBConnector> stateDb = std::make_shared<DBConnector>("STATE_DB", 0);
+    m_stateTable = std::make_shared<swss::Table>(stateDb.get(), STATE_MONIT_TX_STATUS_TABLE_NAME);
 
     m_configTable = std::unique_ptr<swss::Table>(new swss::Table(configDb, CFG_MONIT_TX_CONFIG_TABLE_NAME));
 
     loadConfig();
-    // updateAvailablePorts();
 
     m_timer = new SelectableTimer(timespec { .tv_sec = static_cast<time_t>(m_timeInterval), .tv_nsec = 0 });
     auto executor = new ExecutableTimer(m_timer, this, "MONIT_TX_STATUS_TIMER");
@@ -69,19 +68,6 @@ void MonitTXStatusOrch::addPort(const Port &port)
         
         SWSS_LOG_INFO("MonitTXStatusOrch: Added port %s for TX error monitoring", port.m_alias.c_str());
     }
-}
-
-void MonitTXStatusOrch::removePort(const Port &port)
-{
-    SWSS_LOG_ENTER();
-    
-    m_ports.erase(port.m_alias);
-    m_portTxErrors.erase(port.m_port_id);
-    
-    // Also remove from STATE_DB
-    m_stateTable->del(port.m_alias);
-    
-    SWSS_LOG_INFO("MonitTXStatusOrch: Removed port %s from TX error monitoring", port.m_alias.c_str());
 }
 
 void MonitTXStatusOrch::loadConfig()
@@ -224,7 +210,6 @@ void MonitTXStatusOrch::doTask(SelectableTimer &timer)
     if(!gPortsOrch)
     {
         SWSS_LOG_WARN("MonitTXStatusOrch: PortsOrch not available yet");
-        SWSS_LOG_NOTICE("MonitTXStatusOrch: PortsOrch not available yet, skipping timer task");
         return;
     }
 
@@ -254,9 +239,13 @@ void MonitTXStatusOrch::updatePortTxStatus(const Port &port)
     uint64_t currentTxErrors = getPortTxErrors(port);
     uint64_t previousTxErrors = m_portTxErrors[port.m_port_id];
 
-    // Handle counter wrap-around
+    
     uint64_t txErrorsDelta = 0;
-    if (currentTxErrors >= previousTxErrors)
+    
+    if(currentTxErrors == NA_VALUE || previousTxErrors == NA_VALUE){
+        txErrorsDelta = NA_VALUE;
+    }
+    else if (currentTxErrors >= previousTxErrors)
     {
         txErrorsDelta = currentTxErrors - previousTxErrors;
     }
@@ -267,7 +256,12 @@ void MonitTXStatusOrch::updatePortTxStatus(const Port &port)
 
     m_portTxErrors[port.m_port_id] = currentTxErrors;
 
-    if (txErrorsDelta > m_TxErrorThreshold)
+    if(txErrorsDelta == NA_VALUE){
+        updateStateDb(port, NA_STATUS);
+        SWSS_LOG_WARN("MonitTXStatusOrch: Port %s TX status is N/A", port.m_alias.c_str());
+        return;
+    }
+    else if (txErrorsDelta > m_TxErrorThreshold)
     {
         updateStateDb(port, MONIT_TX_STATE_ERROR);
         SWSS_LOG_WARN("MonitTXStatusOrch: Port %s TX errors (%lu) exceeded threshold (%lu)",
@@ -294,7 +288,7 @@ uint64_t MonitTXStatusOrch::getPortTxErrors(const Port &port)
     {
         SWSS_LOG_DEBUG("MonitTXStatusOrch: No counters found for port %s (OID: %s)", 
                        port.m_alias.c_str(), key.c_str());
-        return 0;
+        return NA_VALUE;
     }
 
     for (const auto &fv : fieldValues)
@@ -309,13 +303,13 @@ uint64_t MonitTXStatusOrch::getPortTxErrors(const Port &port)
             {
                 SWSS_LOG_ERROR("MonitTXStatusOrch: Failed to parse TX errors for port %s: %s",
                                port.m_alias.c_str(), fvValue(fv).c_str());
-                return 0;
+                return NA_VALUE;
             }
         }
     }
 
     SWSS_LOG_DEBUG("MonitTXStatusOrch: SAI_PORT_STAT_IF_OUT_ERRORS not found for port %s", port.m_alias.c_str());
-    return 0;
+    return NA_VALUE;
 }
 
 void MonitTXStatusOrch::updateStateDb(const Port &port, const std::string &status)
@@ -338,17 +332,7 @@ void MonitTXStatusOrch::resetTXErrorCounters()
 
     for (const auto &portPair : m_ports)
     {
-        resetPortTxErrors(portPair.second);
+        m_portTxErrors[portPair.second.m_port_id] = getPortTxErrors(portPair.second);
+        updateStateDb(portPair.second, MONIT_TX_STATE_RESET);
     }
 }
-
-void MonitTXStatusOrch::resetPortTxErrors(const Port &port)
-{
-    SWSS_LOG_ENTER();
-
-    SWSS_LOG_NOTICE("MonitTXStatusOrch: Resetting TX errors for port %s", port.m_alias.c_str());
-
-    m_portTxErrors[port.m_port_id] = getPortTxErrors(port);
-    updateStateDb(port, MONIT_TX_STATE_RESET);
-}
-
